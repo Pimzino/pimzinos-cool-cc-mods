@@ -38,6 +38,11 @@ export const ICONS = {
     glyph: '◧',
     paths: '<path d="M8 2.25 2 5.5l6 3.25 6-3.25zM2 8l6 3.25L14 8M2 10.5l6 3.25 6-3.25"/>',
   },
+  cache: {
+    name: 'Prompt cache',
+    glyph: '◍',
+    paths: '<ellipse cx="8" cy="4.25" rx="5.25" ry="2"/><path d="M2.75 4.25v7.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-7.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/>',
+  },
   cost: {
     name: 'Session cost',
     glyph: '$',
@@ -75,11 +80,15 @@ export const iconFor = (key) => ICONS[key] ?? { ...OTHER_ICON, name: key.replace
 const DETAIL_ICONS = {
   reset: '<path d="M8.4 5a3.4 3.4 0 1 1-1-2.4M8.5 1.4v2.2H6.3"/>',
   alert: '<path d="M5 1.5 9.2 8.6H.8zM5 4.2v2.1M5 7.5v.1"/>',
+  // Arrows for the prompt cache: down for what was read out of it, up for what was written in
+  down: '<path d="M5 1.25v7.25M2 5.75 5 8.75l3-3"/>',
+  up: '<path d="M5 8.75V1.5M2 4.25 5 1.25l3 3"/>',
 }
 
 export const ALERT_HEX = '#e5534b'
 export const ACCENT_HEX = '#d97757'
 export const ADDED_HEX = '#4caf7d'
+export const WRITTEN_HEX = '#e0a23c'
 
 // Bar colors by how full a meter is. Mid-tones, so they read on light and dark themes.
 const COLORS = [
@@ -139,9 +148,9 @@ export const icon = (key, x, y) =>
   `<g class="icon" stroke="#8a8880" ${STROKES} stroke-width="1.4" transform="translate(${+x.toFixed(2)} ${+y.toFixed(2)})">${iconFor(key).paths}</g>`
 
 // A detail's icon, 10 pixels square
-export const detailIcon = (kind, x, y) => {
-  const paint = kind === 'alert' ? `stroke="${ALERT_HEX}"` : 'class="icon" stroke="#8a8880"'
-  return `<g ${paint} ${STROKES} stroke-width="1.1" transform="translate(${+x.toFixed(2)} ${+y.toFixed(2)})">${DETAIL_ICONS[kind]}</g>`
+export const detailIcon = (kind, x, y, hex) => {
+  const paint = hex ? `stroke="${hex}"` : kind === 'alert' ? `stroke="${ALERT_HEX}"` : 'class="icon" stroke="#8a8880"'
+  return `<g ${paint} ${STROKES} stroke-width="${kind === 'up' || kind === 'down' ? 1.5 : 1.1}" transform="translate(${+x.toFixed(2)} ${+y.toFixed(2)})">${DETAIL_ICONS[kind]}</g>`
 }
 
 // A rounded bar: the track, then the filled part in `hex`

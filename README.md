@@ -26,9 +26,10 @@ Mods need Claude Code v2.1.287 or later. On earlier builds, set `CLAUDE_CODE_ENA
 
 ### usage-meter
 
-Each meter starts with an icon: a clock for the 5-hour limit, a calendar for the weekly limit, a coin for the spend limit, stacked layers for the context window, and a receipt for the session's cost at API prices.
+Each meter starts with an icon: a clock for the 5-hour limit, a calendar for the weekly limit, a coin for the spend limit, stacked layers for the context window, a cylinder for the prompt cache, and a receipt for the session's cost at API prices.
 
 - **Warnings in the band.** A limit that is filling fast enough to run out before it resets says when it will be full. The context meter says when the conversation is close to being summarised. The cost meter shows the latest turn's cost beside the session total.
+- **Prompt cache.** A meter shows the tokens read from the prompt cache behind a down arrow and the tokens written to it behind an up arrow. Cached input is billed at a fraction of the price. The Details pane adds the share of input that came from cache, and the uncached input and output tokens.
 - **Tooltips.** Pointing at a meter says what it is and, for a limit, its full reset date. The two buttons have tooltips too.
 - **Notices.** One appears when a plan limit reaches the warning level (90% unless changed), and another when a limit's window starts over.
 - **Repository row.** When the session is inside a git repository, a second row under the meters shows the repository, the branch, lines added and removed since the last commit, and how many files changed. Outside a repository the row is not drawn.

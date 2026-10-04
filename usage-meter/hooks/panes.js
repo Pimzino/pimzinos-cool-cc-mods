@@ -1,7 +1,7 @@
 // The side panes' drawings for the Desktop app: each card is one SVG, laid out for the
 // width it is given, and the same content as markdown for the terminal.
 
-import { ACCENT_HEX, ALERT_HEX, WEIGHT_STRONG, bar, clamp, colorFor, detailIcon, icon, rect, svg, text } from './draw.js'
+import { ACCENT_HEX, ADDED_HEX, ALERT_HEX, WEIGHT_STRONG, WRITTEN_HEX, bar, clamp, colorFor, detailIcon, icon, rect, svg, text } from './draw.js'
 
 const PAD = 14
 const RADIUS = 10
@@ -91,6 +91,34 @@ function contextCard(width, context) {
       height = top + 12 - y
     }
     return { markup, height }
+  })
+}
+
+// Prompt cache: the tokens read out of the cache and written into it, with the rest by kind
+function cacheCard(width, cache) {
+  return card(width, 'Prompt cache', (x, y, inner) => {
+    // What was read out of the cache and written into it, each behind its arrow
+    let markup = detailIcon('down', x, y + 3, ADDED_HEX)
+    const read = text(cache.read, x + 14, y + 13, { size: 15, weight: WEIGHT_STRONG })
+    const readLabel = text('read', x + 14 + read.width + 5, y + 13, { size: 11.5, tone: 'dim' })
+    const next = x + 14 + read.width + 5 + readLabel.width + 16
+    markup += read.markup + readLabel.markup + detailIcon('up', next, y + 3, WRITTEN_HEX)
+    const written = text(cache.written, next + 14, y + 13, { size: 15, weight: WEIGHT_STRONG })
+    markup += written.markup + text('written', next + 14 + written.width + 5, y + 13, { size: 11.5, tone: 'dim' }).markup
+    markup += text(Math.round(cache.share) + '% of input from cache', x + inner, y + 13, { size: 11.5, tone: 'dim', anchor: 'end' }).markup
+    const row = tiles(
+      [
+        ['Sent uncached', cache.fresh],
+        ['Output', cache.output],
+      ],
+      x,
+      y + 30,
+      inner,
+      400,
+    )
+    markup += row.markup
+    markup += text(cache.span + (cache.lastShare !== null ? ' Latest turn ' + Math.round(cache.lastShare) + '% from cache.' : ''), x, y + 30 + row.height + 8, { size: 11, tone: 'dim' }).markup
+    return { markup, height: 30 + row.height + 12 }
   })
 }
 
@@ -234,6 +262,7 @@ function sessionCard(width, rows) {
 export function usageCards(model, width) {
   const cards = [{ ...limitsCard(width, model.limits), alt: 'Plan limits' }]
   if (model.context) cards.push({ ...contextCard(width, model.context), alt: 'Context window' })
+  if (model.cache) cards.push({ ...cacheCard(width, model.cache), alt: 'Prompt cache' })
   if (model.cost) cards.push({ ...costCard(width, model.cost), alt: 'Cost at API prices' })
   if (model.history) cards.push({ ...historyCard(width, model.history), alt: 'Cost history' })
   cards.push({ ...sessionCard(width, model.session), alt: 'Session' })
@@ -267,6 +296,10 @@ export function usageMarkdown(model) {
       out.push('| Category | Tokens | Share |', '|:--|--:|--:|')
       for (const c of model.context.categories) out.push(`| ${c.name} | ${c.tokens.toLocaleString()} | ${c.share.toFixed(1)}% |`)
     }
+  }
+  if (model.cache) {
+    const k = model.cache
+    out.push('', '## Prompt cache', '', `${Math.round(k.share)}% of input read from cache this session.`, '', '| | |', '|:--|--:|', `| Read from cache | ${k.read} |`, `| Written to cache | ${k.written} |`, `| Sent uncached | ${k.fresh} |`, `| Output | ${k.output} |`)
   }
   if (model.cost) {
     const c = model.cost

@@ -1,5 +1,5 @@
 import { parseFont } from './font.js'
-import { ADDED_HEX, ALERT_HEX, ICONS, WEIGHT_NORMAL, WEIGHT_STRONG, bar, clamp, colorFor, detailIcon, icon, iconFor, setFont, svg, text } from './draw.js'
+import { ADDED_HEX, ALERT_HEX, ICONS, WEIGHT_NORMAL, WEIGHT_STRONG, WRITTEN_HEX, bar, clamp, colorFor, detailIcon, icon, iconFor, setFont, svg, text } from './draw.js'
 import { heading, settingLabel, usageCards, usageMarkdown } from './panes.js'
 
 // Where the meters are drawn. 'AbovePrompt' is the band directly above the prompt box,
@@ -73,6 +73,7 @@ const SETTINGS = [
   { key: 'showWeekly', group: 'Meters', name: 'Weekly limit', description: 'Show the weekly plan limit', initial: true },
   { key: 'showSpendLimit', group: 'Meters', name: 'Spend limit', description: 'Show the spend limit, where the account has one', initial: true },
   { key: 'showContext', group: 'Meters', name: 'Context window', description: 'Show how full the context window is', initial: true },
+  { key: 'showCache', group: 'Meters', name: 'Prompt cache', description: "Show how much of the session's input was read from cache", initial: true },
   { key: 'showCost', group: 'Meters', name: 'Session cost', description: 'Show what the session would have cost at API prices', initial: true },
   { key: 'showTurnCost', group: 'Meters', name: "Latest turn's cost", description: 'Show the latest turn beside the session cost', initial: true },
   { key: 'showRepo', group: 'Repository', name: 'Repository row', description: 'Show the repository, branch and changes under the meters', initial: true },
@@ -86,7 +87,7 @@ const WARN_LEVELS = Array.from({ length: 20 }, (_, i) => (i + 1) * 5)
 const WARN_INITIAL = 90
 
 // The setting that shows or hides each meter
-const SHOW = { five_hour: 'showFiveHour', seven_day: 'showWeekly', spend_limit: 'showSpendLimit', context: 'showContext', cost: 'showCost' }
+const SHOW = { five_hour: 'showFiveHour', seven_day: 'showWeekly', spend_limit: 'showSpendLimit', context: 'showContext', cache: 'showCache', cost: 'showCost' }
 
 // The latest figures from $.session.usage(), shared by the hooks below
 let usage = null
@@ -110,6 +111,12 @@ const readings = new Map()
 let turnStartCost = null
 const turnCosts = []
 
+// The session's tokens by kind, summed over every finished turn, and the latest turn's alone:
+// input read from the prompt cache, written to it, sent uncached, and the output
+let tokens = { read: 0, written: 0, fresh: 0, output: 0 }
+let lastTurnTokens = null
+let tokensKey = ''
+
 // Cost history: this session's spend by day, as kept in the store, and every session's by day
 let historyKey = ''
 let mySpend = {}
@@ -128,6 +135,12 @@ let paneDrawing = null
 let paneTimer = null
 
 const money = (usd) => '$' + usd.toFixed(2)
+
+// "1.2M", "80.4K" or "912" tokens
+const count = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)))
+
+// The share of the input that was read from the prompt cache, as a percent, or null with no input yet
+const cacheShare = (t) => (t && t.read + t.written + t.fresh > 0 ? (t.read / (t.read + t.written + t.fresh)) * 100 : null)
 const isOn = (key) => settings[key] ?? SETTINGS.find((s) => s.key === key)?.initial ?? true
 const warnAt = () => (WARN_LEVELS.includes(settings.warnAt) ? settings.warnAt : WARN_INITIAL)
 
@@ -201,6 +214,14 @@ function meterSvg(m, layout) {
   const figure = text(m.figure, x, 12.25, { weight: WEIGHT_STRONG, color: tone })
   body += figure.markup
   x += figure.width
+  // A meter of flows, the prompt cache: an arrow and a figure for each direction
+  for (const [i, flow] of (m.flows ?? []).entries()) {
+    if (i > 0) x += 8
+    body += detailIcon(flow.kind, x, 3.25, flow.hex)
+    const amount = text(flow.text, x + 12, 12.25, { weight: WEIGHT_STRONG })
+    body += amount.markup
+    x += 12 + amount.width
+  }
   if (showsDetail(m, layout)) {
     x += 7
     if (m.detail.kind !== 'plain') {
@@ -302,6 +323,14 @@ function compactAt() {
   return typeof threshold === 'number' && window > 0 ? Math.round((threshold / window) * 100) : null
 }
 
+// The tokens the cache figures are worked out from: the session's once a turn has finished,
+// and until then the latest request's, so the meter has something to show from the start
+function cacheTokens() {
+  if (cacheShare(tokens) !== null) return { ...tokens, isSession: true }
+  const u = breakdown?.apiUsage
+  return u ? { read: u.cache_read_input_tokens, written: u.cache_creation_input_tokens, fresh: u.input_tokens, output: u.output_tokens, isSession: false } : null
+}
+
 // What the running turn has cost so far
 function turnCost() {
   const usd = usage?.cost?.usd
@@ -346,6 +375,24 @@ function meters(now) {
       figure: percent + '%',
       detail: isNear ? { kind: 'alert', text: 'compacts at ' + compacts + '%' } : null,
       hint: percent + '% full' + (compacts !== null ? ', summarised at about ' + compacts + '%' : ''),
+    })
+  }
+  // The prompt cache: tokens read out of it, which are billed at a fraction of the price,
+  // and tokens written into it, each behind its own arrow
+  const cached = cacheTokens()
+  const share = cacheShare(cached)
+  if (share !== null) {
+    const span = cached.isSession ? 'this session' : 'in the latest request'
+    list.push({
+      key: 'cache',
+      name: ICONS.cache.name,
+      figure: '',
+      flows: [
+        { kind: 'down', glyph: '↓', text: count(cached.read), hex: ADDED_HEX, color: 'green' },
+        { kind: 'up', glyph: '↑', text: count(cached.written), hex: WRITTEN_HEX, color: 'yellow' },
+      ],
+      detail: null,
+      hint: count(cached.read) + ' tokens read from cache and ' + count(cached.written) + ' written ' + span + ', ' + Math.round(share) + '% of input served from cache',
     })
   }
   // What the session's requests add up to at API prices, as /cost totals it
@@ -444,11 +491,26 @@ function usageModel(now) {
     }
   }
 
+  const cached = cacheTokens()
+  const share = cacheShare(cached)
+  const cache =
+    share === null
+      ? null
+      : {
+          share,
+          read: count(cached.read),
+          written: count(cached.written),
+          fresh: count(cached.fresh),
+          output: count(cached.output),
+          lastShare: cacheShare(lastTurnTokens),
+          span: cached.isSession ? 'Tokens this session.' : 'Tokens in the latest request; the session total starts with the next reply.',
+        }
+
   const session = []
   if (usage?.startedAt) session.push(['Running for', formatSpan(now - usage.startedAt)])
   if (version) session.push(['Bundled Claude Code', version])
   if (breakdown?.model) session.push(['Model', breakdown.model])
-  return { limits, context, cost, history, session }
+  return { limits, context, cache, cost, history, session }
 }
 
 // Reads every session's spend by day from the store, and drops sessions past HISTORY_DAYS
@@ -457,6 +519,12 @@ async function loadHistory($, now) {
   const total = {}
   let sessions = 0
   for (const key of await $.store.keys()) {
+    // Token counts of sessions past the same age go too
+    if (key.startsWith('tokens:') && key !== tokensKey) {
+      const kept = await $.store.get(key)
+      if (!kept?.day || kept.day < oldest) await $.store.delete(key)
+      continue
+    }
     if (!key.startsWith('spend:')) continue
     const days = (await $.store.get(key)) ?? {}
     const latest = Object.keys(days).sort().at(-1)
@@ -649,6 +717,10 @@ export function register(on) {
     const first = await $.session.usage()
     // One entry in the store for each session, named by when it began
     historyKey = 'spend:' + first.startedAt
+    // The session's token counts are kept too, so a resumed session carries on from them
+    tokensKey = 'tokens:' + first.startedAt
+    const kept = await $.store.get(tokensKey)
+    if (kept) tokens = { read: kept.read ?? 0, written: kept.written ?? 0, fresh: kept.fresh ?? 0, output: kept.output ?? 0 }
     await loadHistory($, await $.clock.now())
     await take($, first)
     await readBreakdown($)
@@ -663,6 +735,18 @@ export function register(on) {
     if (typeof usd === 'number') {
       if (turnStartCost !== null && usd - turnStartCost >= 0.005) turnCosts.push(usd - turnStartCost)
       turnStartCost = usd
+    }
+    return next(e)
+  })
+
+  // A turn ended, the main one or a subagent's: add its tokens to the session's
+  on('turn.complete', async ($, e, next) => {
+    const u = e.usage
+    if (u) {
+      lastTurnTokens = { read: u.cache_read_input_tokens, written: u.cache_creation_input_tokens, fresh: u.input_tokens, output: u.output_tokens }
+      tokens = { read: tokens.read + lastTurnTokens.read, written: tokens.written + lastTurnTokens.written, fresh: tokens.fresh + lastTurnTokens.fresh, output: tokens.output + lastTurnTokens.output }
+      if (tokensKey) await $.store.set(tokensKey, { ...tokens, day: dayKey(await $.clock.now()) })
+      redraw($, await $.clock.now())
     }
     return next(e)
   })
@@ -792,7 +876,8 @@ export function register(on) {
       const parts = [
         [{ dimColor: true }, iconFor(m.key).glyph],
         ...(hasBar ? [[{ color: tone }, barText(m.percent, layout)]] : []),
-        [{ bold: true, ...(tone && !hasBar ? { color: tone } : {}) }, m.figure],
+        ...(m.figure ? [[{ bold: true, ...(tone && !hasBar ? { color: tone } : {}) }, m.figure]] : []),
+        ...(m.flows ?? []).map((flow) => [{ bold: true, color: flow.color }, flow.glyph + flow.text]),
         ...(showsDetail(m, layout) ? [[m.detail.kind === 'alert' ? { color: 'red' } : { dimColor: true }, marks[m.detail.kind] + m.detail.text]] : []),
       ]
       const width = parts.reduce((sum, [, string]) => sum + string.length, 0) + parts.length - 1

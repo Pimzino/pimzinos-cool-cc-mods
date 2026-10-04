@@ -1,6 +1,6 @@
 {
   "name": "usage-meter",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Shows your plan limits (5-hour and weekly), context window usage and session cost at API prices in a band above the prompt, with pace warnings, a details pane and cost history",
   "author": {
     "name": "pimzino"
