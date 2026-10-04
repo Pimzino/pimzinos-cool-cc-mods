@@ -1,5 +1,5 @@
 import { parseFont } from './font.js'
-import { ALERT_HEX, ICONS, WEIGHT_NORMAL, WEIGHT_STRONG, bar, clamp, colorFor, detailIcon, icon, iconFor, setFont, svg, text } from './draw.js'
+import { ADDED_HEX, ALERT_HEX, ICONS, WEIGHT_NORMAL, WEIGHT_STRONG, bar, clamp, colorFor, detailIcon, icon, iconFor, setFont, svg, text } from './draw.js'
 import { heading, settingLabel, usageCards, usageMarkdown } from './panes.js'
 
 // Where the meters are drawn. 'AbovePrompt' is the band directly above the prompt box,
@@ -12,6 +12,9 @@ const REFRESH_MS = 60_000
 // The side panes: the full picture, and the settings
 const USAGE_PANE = 'usage-meter'
 const SETTINGS_PANE = 'usage-meter-settings'
+
+// The repository is read at most this often
+const REPO_REFRESH_MS = 10_000
 
 // The usage pane is redrawn at most this often, however fast the figures move, so it holds
 // still while a reply is being written
@@ -45,6 +48,9 @@ const CELL_PX = 8
 // Where a tooltip sits against its element, in rows: negative is above it
 const TIP_ROWS = -1
 
+// How far the divider reaches past each end of the repository row, in pixels
+const DIVIDER_OVERHANG = 28
+
 // Cells between two meters, and the cells the band's two buttons take
 const GAP = 3
 const BUTTON_CELLS = 10
@@ -69,12 +75,15 @@ const SETTINGS = [
   { key: 'showContext', group: 'Meters', name: 'Context window', description: 'Show how full the context window is', initial: true },
   { key: 'showCost', group: 'Meters', name: 'Session cost', description: 'Show what the session would have cost at API prices', initial: true },
   { key: 'showTurnCost', group: 'Meters', name: "Latest turn's cost", description: 'Show the latest turn beside the session cost', initial: true },
+  { key: 'showRepo', group: 'Repository', name: 'Repository row', description: 'Show the repository, branch and changes under the meters', initial: true },
   { key: 'showVersion', group: 'Footer', name: 'Claude Code version', description: 'Show the bundled version under the prompt', initial: true },
   { key: 'showSessionAge', group: 'Footer', name: 'Session age', description: 'Show how long the session has been running', initial: true },
   { key: 'notifyOnReset', group: 'Notices', name: 'Limit reset', description: 'Say so when a plan limit starts over', initial: true },
   { key: 'notifyOnWarn', group: 'Notices', name: 'Limit warning', description: 'Say so when a plan limit reaches the warning level', initial: true },
 ]
-const WARN_LEVELS = [70, 80, 90, 95]
+// The warning levels on offer: every 5% up to 100%, with 90% used until one is picked
+const WARN_LEVELS = Array.from({ length: 20 }, (_, i) => (i + 1) * 5)
+const WARN_INITIAL = 90
 
 // The setting that shows or hides each meter
 const SHOW = { five_hour: 'showFiveHour', seven_day: 'showWeekly', spend_limit: 'showSpendLimit', context: 'showContext', cost: 'showCost' }
@@ -108,6 +117,11 @@ let recordedCost = null
 let spendByDay = {}
 let sessionCount = 0
 
+// The git repository the session is working in, or null when it is not in one
+let repo = null
+let repoReadAt = 0
+let sessionFolder = ''
+
 // What the band last showed, and the usage pane's last drawing with when it was made
 let shownBand = ''
 let paneDrawing = null
@@ -115,7 +129,7 @@ let paneTimer = null
 
 const money = (usd) => '$' + usd.toFixed(2)
 const isOn = (key) => settings[key] ?? SETTINGS.find((s) => s.key === key)?.initial ?? true
-const warnAt = () => (WARN_LEVELS.includes(settings.warnAt) ? settings.warnAt : 90)
+const warnAt = () => (WARN_LEVELS.includes(settings.warnAt) ? settings.warnAt : WARN_INITIAL)
 
 // "2h 14m" for a span under a day, "3d 4h" for a longer one
 function formatSpan(ms) {
@@ -198,6 +212,60 @@ function meterSvg(m, layout) {
     x += detail.width
   }
   return svg(Math.ceil(x + 1), 16, body)
+}
+
+// The repository row's pieces, most important first: each is a list of icons and texts,
+// and the row drops pieces from the end until it fits
+function repoPieces(r) {
+  const pieces = [
+    [{ icon: 'repo' }, { text: r.name, weight: WEIGHT_STRONG }],
+    [{ icon: 'branch' }, { text: r.branch, tone: 'dim' }],
+    [{ text: '+' + r.added.toLocaleString(), weight: WEIGHT_STRONG, color: ADDED_HEX }, { text: '−' + r.removed.toLocaleString(), weight: WEIGHT_STRONG, color: ALERT_HEX }],
+    [{ text: r.files + (r.files === 1 ? ' file' : ' files') + (r.untracked ? ', ' + r.untracked + ' new' : ''), tone: 'dim' }],
+  ]
+  const distance = [r.ahead ? r.ahead + ' ahead' : '', r.behind ? r.behind + ' behind' : ''].filter(Boolean).join(', ')
+  if (distance) pieces.push([{ text: distance, tone: 'dim' }])
+  if (r.folder) pieces.push([{ icon: 'folder' }, { text: r.folder, tone: 'dim' }])
+  return pieces
+}
+
+// What the repository row's tooltip says
+function repoHint(r) {
+  const distance = r.ahead === null ? '' : r.ahead || r.behind ? ', ' + [r.ahead ? r.ahead + ' ahead' : '', r.behind ? r.behind + ' behind' : ''].filter(Boolean).join(' and ') + ' of upstream' : ', up to date with upstream'
+  const commit = r.commit ? '. Last commit ' + r.commit.hash + ', ' + r.commit.when : ''
+  return r.files + (r.files === 1 ? ' file' : ' files') + ' changed, +' + r.added + ' −' + r.removed + (r.untracked ? ', ' + r.untracked + ' new' : '') + distance + commit
+}
+
+// The repository row for the Desktop app: as many pieces as fit in `room` pixels, under a
+// faint line that divides it from the meters. The line reaches a little past the row's
+// own ends, and never past the meters above, which are `span` pixels across.
+function repoSvg(r, room, span) {
+  const gap = 18
+  const sized = repoPieces(r).map((piece) => ({
+    piece,
+    width: piece.reduce((sum, part) => sum + (part.icon ? 20 : text(part.text, 0, 0, part).width + 6), -6),
+  }))
+  while (sized.length > 1 && sized.reduce((sum, p) => sum + p.width + gap, -gap) > room) sized.pop()
+  let x = 0
+  let body = ''
+  for (const { piece } of sized) {
+    for (const part of piece) {
+      if (part.icon) {
+        body += icon(part.icon, x, 0)
+        x += 20
+      } else {
+        const drawn = text(part.text, x, 12.25, part)
+        body += drawn.markup
+        x += drawn.width + 6
+      }
+    }
+    x += gap - 6
+  }
+  const content = Math.ceil(x - gap + 1)
+  const width = Math.ceil(Math.min(room, Math.max(content, span)))
+  const reach = Math.min(width, Math.max(content, Math.min(content + 2 * DIVIDER_OVERHANG, span * 0.8)))
+  const line = `<rect class="track" x="${((width - reach) / 2).toFixed(2)}" y="4" width="${reach.toFixed(2)}" height="1" fill="#888888" fill-opacity="0.3"/>`
+  return svg(width, 27, line + `<g transform="translate(${Math.max(0, (width - content) / 2).toFixed(2)} 11)">${body}</g>`)
 }
 
 // The same bar as characters, for the terminal: one cell for every 7 pixels of the drawn bar
@@ -426,6 +494,7 @@ async function recordSpend($, now) {
 async function take($, figures) {
   const now = await $.clock.now()
   usage = figures
+  await readRepo($, now)
   for (const limit of usage.rateLimits) {
     const before = lastLimit.get(limit.kind)
     const name = iconFor(limit.kind).name
@@ -453,7 +522,7 @@ async function take($, figures) {
 // Asks for a redraw only when what is shown has changed: at once for the band, and for
 // the usage pane no sooner than PANE_REFRESH_MS after its last drawing
 function redraw($, now) {
-  const band = JSON.stringify(meters(now))
+  const band = JSON.stringify([meters(now), isOn('showRepo') ? repo : null])
   if (band !== shownBand) {
     shownBand = band
     $.ui.invalidate('ui.render')
@@ -467,12 +536,17 @@ function redraw($, now) {
   })
 }
 
-// The footer under the prompt: the Claude Code version and how long the session has run
-function showStatus($, now) {
+// The footer under the prompt: the Claude Code version and how long the session has run.
+// The Desktop app puts the plugin's name in front of it, and draws no other footer slot.
+function footerText(now) {
   const parts = []
   if (version && isOn('showVersion')) parts.push('Bundled CC ' + version)
   if (usage?.startedAt && isOn('showSessionAge')) parts.push('session ' + formatSpan(now - usage.startedAt))
-  $.ui.status(parts.length ? parts.join(' · ') : undefined)
+  return parts.join(' · ')
+}
+
+function showStatus($, now) {
+  $.ui.status(footerText(now) || undefined)
 }
 
 // Read the figures now, and redraw
@@ -489,6 +563,62 @@ async function readBreakdown($) {
   }
 }
 
+// Runs git in the session's folder and answers what it printed, or null when it failed
+async function git($, ...args) {
+  try {
+    const ran = await $.process.run(['git', ...args], { timeoutMs: 5000 })
+    return ran.exitCode === 0 ? ran.stdout.trim() : null
+  } catch {
+    return null
+  }
+}
+
+// Reads the repository the session is in: its name, branch, uncommitted changes, how far
+// it is from its upstream, and its last commit. Leaves `repo` null outside a repository.
+async function readRepo($, now) {
+  if (now - repoReadAt < REPO_REFRESH_MS) return
+  repoReadAt = now
+  const top = await git($, 'rev-parse', '--show-toplevel')
+  if (top === null) {
+    repo = null
+    return
+  }
+  const [branch, remote, numstat, status, distance, last] = await Promise.all([
+    git($, 'branch', '--show-current'),
+    git($, 'remote', 'get-url', 'origin'),
+    git($, 'diff', '--numstat', 'HEAD'),
+    git($, 'status', '--porcelain'),
+    git($, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD'),
+    git($, 'log', '-1', '--format=%h%x09%s%x09%cr'),
+  ])
+  let added = 0
+  let removed = 0
+  for (const line of (numstat ?? '').split('\n')) {
+    const [plus, minus] = line.split('\t')
+    added += Number(plus) || 0
+    removed += Number(minus) || 0
+  }
+  const changes = (status ?? '').split('\n').filter(Boolean)
+  const [behind, ahead] = distance ? distance.split(/\s+/).map(Number) : [null, null]
+  const [hash, subject, when] = (last ?? '').split('\t')
+  // "owner/name" from the remote's address, or the folder's own name without one
+  const named = remote?.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/)?.[1]
+  const inside = sessionFolder.startsWith(top) ? sessionFolder.slice(top.length).replace(/^\//, '') : ''
+  repo = {
+    name: named ?? top.split('/').at(-1),
+    branch: branch || 'detached',
+    root: top,
+    folder: inside,
+    added,
+    removed,
+    files: changes.filter((line) => !line.startsWith('??')).length,
+    untracked: changes.filter((line) => line.startsWith('??')).length,
+    ahead,
+    behind,
+    commit: hash ? { hash, subject, when } : null,
+  }
+}
+
 // Changes one setting, keeps it for later sessions, and redraws everything it touches
 async function setSetting($, key, value) {
   settings = { ...settings, [key]: value }
@@ -500,13 +630,16 @@ async function setSetting($, key, value) {
 
 async function openUsage($) {
   await readBreakdown($)
+  repoReadAt = 0
+  await readRepo($, await $.clock.now())
   paneDrawing = null
-  await $.ui.open({ id: USAGE_PANE, title: 'Usage' })
+  await $.ui.open({ id: USAGE_PANE, title: 'Details' })
 }
 
 export function register(on) {
   // Runs before your first prompt, and again after a reload
   on('session.start', async ($, e, next) => {
+    sessionFolder = e.cwd ?? ''
     await loadFont($)
     settings = (await $.store.get('settings')) ?? {}
     // The release, such as 2.1.280, or the full version when it is not spelled as one
@@ -639,7 +772,8 @@ export function register(on) {
             left: 0,
             display: 'none',
             hover: { display: 'flex' },
-            children: [Text({ wrap: 'truncate', children: [label] })],
+            // A long one runs onto a second line, since the app caps the card's width
+            children: [Text({ wrap: 'wrap', children: [label] })],
           }),
         ],
       })
@@ -684,18 +818,33 @@ export function register(on) {
         flexDirection: 'row',
         columnGap: 1,
         children: [
-          withTip('tip-usage', Button({ key: 'open-usage', label: USAGE_GLYPH, onPress: () => openUsage($) }), 'Usage details'),
-          withTip('tip-settings', Button({ key: 'open-settings', label: SETTINGS_GLYPH, onPress: () => $.ui.open({ id: SETTINGS_PANE, title: 'Usage settings' }) }), 'Usage settings'),
+          withTip('tip-usage', Button({ key: 'open-usage', label: USAGE_GLYPH, onPress: () => openUsage($) }), 'Details'),
+          withTip('tip-settings', Button({ key: 'open-settings', label: SETTINGS_GLYPH, onPress: () => $.ui.open({ id: SETTINGS_PANE, title: 'Settings' }) }), 'Settings'),
         ],
       }),
     )
 
     const mine = Box({ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: GAP, children: elements })
 
-    // What other mods draw here stays above, and the meters sit centred, closest to the prompt
+    // The repository row, under the meters, when the session is in a repository
+    const rows = [mine]
+    if (repo && isOn('showRepo')) {
+      const hint = repoHint(repo)
+      if (canDrawSvg) {
+        // The divider runs the width of the meters row above it
+        const metersWidth = drawn.reduce((sum, d) => sum + d.width, 0) + GAP * CELL_PX * drawn.length + BUTTON_CELLS * CELL_PX
+        const picture = repoSvg(repo, typeof e.props.bodyColumns === 'number' ? (e.props.bodyColumns - 4) * CELL_PX : 2000, metersWidth)
+        rows.push(withTip('tip-repo', Svg({ source: picture.source, alt: hint, width: picture.width, height: picture.height }), hint))
+      } else {
+        const words = repoPieces(repo).map((piece) => piece.map((part) => (part.icon ? iconFor(part.icon).glyph : part.text)).join(' '))
+        rows.push(Text({ dimColor: true, wrap: 'truncate', children: [words.join('  ')] }))
+      }
+    }
+
+    // What other mods draw here stays above, and the rows sit centred, closest to the prompt
     return Box({
       flexDirection: 'column',
-      children: [...(theirs ? [theirs] : []), Box({ flexDirection: 'row', justifyContent: 'center', width: '100%', children: [mine] })],
+      children: [...(theirs ? [theirs] : []), ...rows.map((row) => Box({ flexDirection: 'row', justifyContent: 'center', width: '100%', children: [row] }))],
     })
   })
 }

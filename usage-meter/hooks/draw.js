@@ -43,6 +43,21 @@ export const ICONS = {
     glyph: '$',
     paths: '<path d="M3.75 1.75h8.5v12.5l-2.1-1.3-2.15 1.3-2.15-1.3-2.1 1.3zM6.25 5.5h3.5M6.25 8.5h3.5"/>',
   },
+  repo: {
+    name: 'Repository',
+    glyph: '▣',
+    paths: '<path d="M3.25 2.25h9.5v11.5h-9.5zM3.25 10.75h9.5M6 2.25v8.5"/>',
+  },
+  branch: {
+    name: 'Branch',
+    glyph: '⎇',
+    paths: '<circle cx="5" cy="3.75" r="1.75"/><circle cx="5" cy="12.25" r="1.75"/><circle cx="11.25" cy="5.75" r="1.75"/><path d="M5 5.5v5M11.25 7.5c0 2.2-2.4 2.6-4.6 2.9"/>',
+  },
+  folder: {
+    name: 'Folder',
+    glyph: '▸',
+    paths: '<path d="M1.75 4.25c0-.8.7-1.5 1.5-1.5h3l1.5 1.75h5c.8 0 1.5.7 1.5 1.5v5.75c0 .8-.7 1.5-1.5 1.5h-9.5c-.8 0-1.5-.7-1.5-1.5z"/>',
+  },
   session: {
     name: 'Session',
     glyph: '›',
@@ -64,6 +79,7 @@ const DETAIL_ICONS = {
 
 export const ALERT_HEX = '#e5534b'
 export const ACCENT_HEX = '#d97757'
+export const ADDED_HEX = '#4caf7d'
 
 // Bar colors by how full a meter is. Mid-tones, so they read on light and dark themes.
 const COLORS = [
