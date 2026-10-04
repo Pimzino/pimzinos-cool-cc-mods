@@ -22,7 +22,7 @@ Mods need Claude Code v2.1.287 or later. On earlier builds, set `CLAUDE_CODE_ENA
 
 | Plugin | What it does |
 | :- | :- |
-| [`usage-meter`](usage-meter) | Shows your plan limits (5-hour and weekly), their reset times, and context window usage under the prompt |
+| [`usage-meter`](usage-meter) | Shows your plan limits (5-hour and weekly), their reset times, and context window usage in a band above the prompt |
 
 ## Adding a plugin
 

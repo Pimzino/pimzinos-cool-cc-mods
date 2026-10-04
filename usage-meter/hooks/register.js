@@ -1,6 +1,6 @@
-// Where the meters are drawn. 'PromptHint' is the line under the prompt box,
-// 'AbovePrompt' is the band directly above it.
-const SITE = 'PromptHint'
+// Where the meters are drawn. 'AbovePrompt' is the band directly above the prompt box,
+// the site the Desktop app is known to draw. 'PromptHint' is the line under it.
+const SITE = 'AbovePrompt'
 
 // How often to refresh the figures and the reset countdowns, in milliseconds
 const REFRESH_MS = 60_000
@@ -93,14 +93,18 @@ export function register(on) {
   })
 
   on('ui.render', { component: SITE }, async ($, e, next) => {
+    // Claude Code is asking a survey question in the band, so leave it alone
+    if (e.props.hasSurvey) return next(e)
     const { Box, Text, Svg } = $.ui.resolve(e)
+    // Only the Desktop app can draw an Svg
+    const canDrawSvg = e.surface === 'desktop'
     const theirs = await next(e)
     const now = await $.clock.now()
     const items = meters(now)
 
     const meter = (m) => {
       const percent = Math.round(m.percent)
-      const bar = Svg
+      const bar = canDrawSvg
         ? Svg({ source: barSvg(m.percent), alt: m.label + ' ' + percent + '% used', width: 56, height: 6 })
         : Text({ color: colorFor(m.percent).name, children: [barText(m.percent)] })
       return Box({
@@ -125,15 +129,12 @@ export function register(on) {
         : [...items.map(meter), Text({ dimColor: true, children: ['plan limits appear after the first reply'] })],
     })
 
-    // Claude Code's own drawing stays on the left, and the meters sit in the middle
+    // What other mods draw here stays above, and the meters sit centred, closest to the prompt
     return Box({
-      flexDirection: 'row',
-      alignItems: 'center',
-      width: '100%',
+      flexDirection: 'column',
       children: [
-        Box({ flexGrow: 1, children: theirs ? [theirs] : [] }),
-        mine,
-        Box({ flexGrow: 1, children: [] }),
+        ...(theirs ? [theirs] : []),
+        Box({ flexDirection: 'row', justifyContent: 'center', width: '100%', children: [mine] }),
       ],
     })
   })
