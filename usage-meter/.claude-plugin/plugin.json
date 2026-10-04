@@ -1,7 +1,7 @@
 {
   "name": "usage-meter",
-  "version": "0.4.1",
-  "description": "Shows your plan limits (5-hour and weekly), their reset times, context window usage, and the session's cost at API prices in a band above the prompt, and the Claude Code version in the hint line under it",
+  "version": "0.5.0",
+  "description": "Shows your plan limits (5-hour and weekly), context window usage and session cost at API prices in a band above the prompt, with pace warnings, a details pane and cost history",
   "author": {
     "name": "pimzino"
   }
