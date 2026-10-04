@@ -98,6 +98,9 @@ const COLORS = [
 // The latest figures from $.session.usage(), shared by the hooks below
 let usage = null
 
+// The Claude Code version this session runs on, shown in the hint line under the prompt
+let version = ''
+
 // Each plan limit's percent used at the last reading, to notice one crossing WARN_AT
 const lastPercent = new Map()
 
@@ -605,6 +608,9 @@ export function register(on) {
   // Runs before your first prompt, and again after a reload
   on('session.start', async ($, e, next) => {
     await loadFont($)
+    // The release, such as 2.1.280, or the full version when it is not spelled as one
+    const engine = await $.session.version()
+    version = engine.base ?? engine.version
     await refresh($)
     // Keeps the reset countdowns current while the session is idle
     $.clock.every(REFRESH_MS, () => refresh($))
@@ -679,5 +685,17 @@ export function register(on) {
         Box({ flexDirection: 'row', justifyContent: 'center', width: '100%', children: [mine] }),
       ],
     })
+  })
+
+  // The hint line under the prompt gets the version at its end
+  on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
+    if (!version) return next(e)
+    const text = 'Claude Code ' + version
+    // The terminal adds a tail to its own line. The Desktop app draws no tail yet, so
+    // there the line's text is rewritten with the version after it.
+    if (e.surface === 'terminal') {
+      return next({ ...e, props: { ...e.props, tail: e.props.tail ? e.props.tail + ' · ' + text : text } })
+    }
+    return next({ ...e, props: { ...e.props, hint: e.props.hint ? e.props.hint + ' · ' + text : text } })
   })
 }
