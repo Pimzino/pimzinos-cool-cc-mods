@@ -22,7 +22,9 @@ Mods need Claude Code v2.1.287 or later. On earlier builds, set `CLAUDE_CODE_ENA
 
 | Plugin | What it does |
 | :- | :- |
-| [`usage-meter`](usage-meter) | Shows your plan limits (5-hour and weekly), their reset times, and context window usage in a band above the prompt |
+| [`usage-meter`](usage-meter) | Shows your plan limits (5-hour and weekly), their reset times, context window usage, and the session's cost at API prices in a band above the prompt |
+
+In `usage-meter`, each meter starts with an icon: a clock for the 5-hour limit, a calendar for the weekly limit, a coin for the spend limit, stacked layers for the context window, and a receipt for the session's cost at API prices. On a narrow window the meters shrink: the bars shorten, then the reset times and the bars drop away, and after that the meters wrap onto a second row. In the desktop app, hovering a meter shows a tooltip saying what it is and, for a limit, its full reset date. A notice appears once when a plan limit reaches 90%. In the desktop app the figures are drawn in Claude's own typeface, read from the Claude app installed at `/Applications/Claude.app`; without it they use the system font.
 
 ## Adding a plugin
 

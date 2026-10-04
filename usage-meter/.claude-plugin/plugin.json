@@ -1,7 +1,7 @@
 {
   "name": "usage-meter",
-  "version": "0.2.0",
-  "description": "Shows your plan limits (5-hour and weekly), their reset times, and context window usage in a band above the prompt",
+  "version": "0.3.0",
+  "description": "Shows your plan limits (5-hour and weekly), their reset times, context window usage, and the session's cost at API prices in a band above the prompt",
   "author": {
     "name": "pimzino"
   }
