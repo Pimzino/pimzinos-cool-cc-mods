@@ -1,0 +1,14 @@
+{
+  "name": "pimzinos-cool-cc-mods",
+  "description": "Pimzino's Claude Code mods, tools and skills",
+  "owner": {
+    "name": "pimzino"
+  },
+  "plugins": [
+    {
+      "name": "usage-meter",
+      "source": "./usage-meter",
+      "description": "Shows your plan limits (5-hour and weekly), their reset times, and context window usage under the prompt"
+    }
+  ]
+}
