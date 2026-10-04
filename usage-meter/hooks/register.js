@@ -81,9 +81,12 @@ let font = null
 const RESET_ICON = '<path d="M8.4 5a3.4 3.4 0 1 1-1-2.4M8.5 1.4v2.2H6.3"/>'
 
 // Text and icon colors in a drawn meter. The fill attributes are mid-tones that read on
-// either theme, and these rules sharpen them for the theme in use.
+// either theme, and these rules sharpen them for the theme in use. The first rule says the
+// drawing suits both themes: without it the frame a meter is drawn in gets a white backdrop
+// on a dark theme.
 const SVG_STYLE =
   '<style>' +
+  ':root{color-scheme:light dark}' +
   '.strong{fill:#3d3d3a}.dim{fill:#73726c}.icon{stroke:#73726c}' +
   '@media (prefers-color-scheme:dark){.strong{fill:#e8e6dc}.dim{fill:#9c9a92}.icon{stroke:#9c9a92}}' +
   '</style>'
